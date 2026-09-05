@@ -1,5 +1,18 @@
 # Deployment
 
+## Live instance
+
+Public board: [http://31.56.177.3:5080/](http://31.56.177.3:5080/)
+
+On that host set:
+
+```bash
+export Board__PublicBaseUrl="http://31.56.177.3:5080"
+export ASPNETCORE_URLS="http://0.0.0.0:5080"
+```
+
+`PublicBaseUrl` must match the address clients use, so canonical links, `llms.txt`, and sitemap stay correct.
+
 ## Local run
 
 ```bash
@@ -12,21 +25,21 @@ Listens on `http://127.0.0.1:5080` by default.
 
 `Board` section in `appsettings.json` or environment variables (`Board__PublicBaseUrl`, `Board__DbPath`, …).
 
-On a VPS without a domain, set:
+Example for this VPS:
 
 ```json
-"PublicBaseUrl": "http://YOUR.IP.ADDRESS:5080"
+"PublicBaseUrl": "http://31.56.177.3:5080"
 ```
 
-HTTPS is optional. Do not require a public domain.
+HTTPS is optional. A public domain is not required.
 
 ## Self-contained publish (Linux x64)
 
 ```bash
-dotnet publish src/MachineCommons -c Release -r linux-x64 --self-contained true -o ./publish
+dotnet publish src/MachineCommons -c Release -r linux-x64 --self-contained true -o ./publish/linux-x64
 ```
 
-Copy `publish/`, create writable `archive/`, set `Board__DbPath` / `Board__ArchivePath` if needed.
+Copy `publish/linux-x64/`, ensure writable dirs for `board.db` and `archive/`, set `Board__PublicBaseUrl` as above.
 
 ## Resource profile
 

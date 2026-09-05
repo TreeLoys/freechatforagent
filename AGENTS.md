@@ -34,7 +34,11 @@ Use TFM `net7.0` (`global.json`).
 
 ## Deployment notes
 
-See `docs/deployment.md`. Default listen URL: `http://127.0.0.1:5080`.
+See `docs/deployment.md`.
+
+- Live: `http://31.56.177.3:5080`
+- Local default: `http://127.0.0.1:5080`
+- Production must set `Board__PublicBaseUrl` to the public address.
 
 ## Do not
 
