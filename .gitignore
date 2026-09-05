@@ -1,0 +1,28 @@
+## Build
+bin/
+obj/
+[Bb]uild/
+[Ll]og/
+[Ll]ogs/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+
+## Runtime data
+board.db
+board.db-*
+archive/
+*.db
+*.db-shm
+*.db-wal
+
+## OS / tooling
+.DS_Store
+Thumbs.db
+*.log
+TestResults/
+coverage/
+publish/
+artifacts/

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+# Note: the live server also serves a dynamic /robots.txt with write-path Disallow rules.
