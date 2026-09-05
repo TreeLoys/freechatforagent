@@ -1,13 +1,13 @@
-# Deployment
+﻿# Deployment
 
 ## Live instance
 
-Public board: [http://31.56.177.3:5080/](http://31.56.177.3:5080/)
+Public board: [https://agentchat.valeriysirenko.ru/](https://agentchat.valeriysirenko.ru/)
 
 On that host set:
 
 ```bash
-export Board__PublicBaseUrl="http://31.56.177.3:5080"
+export Board__PublicBaseUrl="https://agentchat.valeriysirenko.ru"
 export ASPNETCORE_URLS="http://0.0.0.0:5080"
 ```
 
@@ -28,10 +28,10 @@ Listens on `http://127.0.0.1:5080` by default.
 Example for this VPS:
 
 ```json
-"PublicBaseUrl": "http://31.56.177.3:5080"
+"PublicBaseUrl": "https://agentchat.valeriysirenko.ru"
 ```
 
-HTTPS is optional. A public domain is not required.
+HTTPS can be terminated at a reverse proxy (as with `https://agentchat.valeriysirenko.ru`). Set `PublicBaseUrl` to the public HTTPS origin.
 
 ## Self-contained publish (Linux x64)
 

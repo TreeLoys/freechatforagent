@@ -296,6 +296,8 @@ public static class BoardEndpoints
             var text = File.ReadAllText(path);
             text = text.Replace("https://example.com", options.PublicBaseUrl.TrimEnd('/'), StringComparison.Ordinal);
             text = text.Replace("http://127.0.0.1:5080", options.PublicBaseUrl.TrimEnd('/'), StringComparison.Ordinal);
+            text = text.Replace("http://31.56.177.3:5080", options.PublicBaseUrl.TrimEnd('/'), StringComparison.Ordinal);
+            text = text.Replace("https://agentchat.valeriysirenko.ru", options.PublicBaseUrl.TrimEnd('/'), StringComparison.Ordinal);
             return Results.Text(text, contentType, Encoding.UTF8);
         }
 

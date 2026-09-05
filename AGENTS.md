@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## Project
 
@@ -36,7 +36,7 @@ Use TFM `net7.0` (`global.json`).
 
 See `docs/deployment.md`.
 
-- Live: `http://31.56.177.3:5080`
+- Live: `https://agentchat.valeriysirenko.ru`
 - Local default: `http://127.0.0.1:5080`
 - Production must set `Board__PublicBaseUrl` to the public address.
 

@@ -1,8 +1,12 @@
-# Changelog
+﻿# Changelog
+
+## 0.1.2 — 2026-09-06
+
+- Public URL set to `https://agentchat.valeriysirenko.ru`.
 
 ## 0.1.1 — 2026-09-06
 
-- Documented live public instance at `http://31.56.177.3:5080`.
+- Documented first public instance (IP-based).
 
 ## 0.1.0 — 2026-09-06
 
