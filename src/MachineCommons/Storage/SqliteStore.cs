@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using MachineCommons.Config;
 using MachineCommons.Models;
@@ -63,9 +64,9 @@ public sealed class SqliteStore : IDisposable
 
     public ClientCredentials CreateClient()
     {
-        var clientId = "c_" + Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLowerInvariant();
-        var token = "t_" + Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLowerInvariant()
-                    + Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLowerInvariant();
+        // Short opaque ids: ~128-bit token as base64url (~22 chars) instead of 64 hex.
+        var clientId = "c_" + ToBase64Url(RandomNumberGenerator.GetBytes(9));
+        var token = "t_" + ToBase64Url(RandomNumberGenerator.GetBytes(16));
         var tokenHash = HashToken(token);
         var now = DateTimeOffset.UtcNow;
 
@@ -85,6 +86,9 @@ public sealed class SqliteStore : IDisposable
 
         return new ClientCredentials { ClientId = clientId, Token = token };
     }
+
+    private static string ToBase64Url(byte[] bytes)
+        => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     public bool ValidateClient(string clientId, string token)
     {
@@ -785,6 +789,208 @@ public sealed class SqliteStore : IDisposable
         LastActivityAt = DateTimeOffset.Parse(r.GetString(9)),
         Protected = r.GetInt32(10) != 0
     };
+
+    public WriteSessionRecord CreateWriteSession(string clientId, string token, int ttlSeconds)
+    {
+        var id = ToCrockfordBase32(RandomNumberGenerator.GetBytes(6));
+        var now = DateTimeOffset.UtcNow;
+        var expires = now.AddSeconds(Math.Max(60, ttlSeconds));
+
+        lock (_writeLock)
+        {
+            using var conn = OpenConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO write_sessions(id, client_id, token, draft, tags, mode, action_version, created_at, expires_at, last_action_at)
+                VALUES ($id, $client, $token, '', '', 'words', 0, $created, $expires, $created);
+                """;
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$client", clientId);
+            cmd.Parameters.AddWithValue("$token", token);
+            cmd.Parameters.AddWithValue("$created", now.ToString("O"));
+            cmd.Parameters.AddWithValue("$expires", expires.ToString("O"));
+            cmd.ExecuteNonQuery();
+        }
+
+        return new WriteSessionRecord
+        {
+            Id = id,
+            ClientId = clientId,
+            Token = token,
+            Draft = "",
+            Tags = "",
+            Mode = "words",
+            ActionVersion = 0,
+            CreatedAt = now,
+            ExpiresAt = expires,
+            LastActionAt = now
+        };
+    }
+
+    public WriteSessionRecord? GetWriteSession(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        using var conn = OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, client_id, token, draft, tags, mode, action_version, created_at, expires_at, last_action_at
+            FROM write_sessions WHERE id=$id LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$id", id);
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        return ReadSession(r);
+    }
+
+    public WriteSessionRecord? TryApplySessionAction(
+        string id,
+        long expectedVersion,
+        Func<WriteSessionRecord, (string Draft, string Tags, string Mode, bool Expire)> mutate)
+    {
+        lock (_writeLock)
+        {
+            using var conn = OpenConnection();
+            using var tx = conn.BeginTransaction();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    SELECT id, client_id, token, draft, tags, mode, action_version, created_at, expires_at, last_action_at
+                    FROM write_sessions WHERE id=$id LIMIT 1;
+                    """;
+                cmd.Parameters.AddWithValue("$id", id);
+                using var r = cmd.ExecuteReader();
+                if (!r.Read()) return null;
+                var session = ReadSession(r);
+                r.Close();
+
+                if (session.ExpiresAt <= DateTimeOffset.UtcNow)
+                    return session;
+                if (session.ActionVersion != expectedVersion)
+                    return session;
+
+                var (draft, tags, mode, expire) = mutate(session);
+                var now = DateTimeOffset.UtcNow;
+                var expires = expire ? now : session.ExpiresAt;
+                var newVersion = session.ActionVersion + 1;
+
+                using var upd = conn.CreateCommand();
+                upd.Transaction = tx;
+                upd.CommandText = """
+                    UPDATE write_sessions
+                    SET draft=$draft, tags=$tags, mode=$mode, action_version=$ver,
+                        expires_at=$expires, last_action_at=$now
+                    WHERE id=$id AND action_version=$old;
+                    """;
+                upd.Parameters.AddWithValue("$draft", draft);
+                upd.Parameters.AddWithValue("$tags", tags);
+                upd.Parameters.AddWithValue("$mode", mode);
+                upd.Parameters.AddWithValue("$ver", newVersion);
+                upd.Parameters.AddWithValue("$expires", expires.ToString("O"));
+                upd.Parameters.AddWithValue("$now", now.ToString("O"));
+                upd.Parameters.AddWithValue("$id", id);
+                upd.Parameters.AddWithValue("$old", expectedVersion);
+                if (upd.ExecuteNonQuery() != 1)
+                {
+                    tx.Rollback();
+                    return GetWriteSession(id);
+                }
+
+                tx.Commit();
+                return new WriteSessionRecord
+                {
+                    Id = session.Id,
+                    ClientId = session.ClientId,
+                    Token = session.Token,
+                    Draft = draft,
+                    Tags = tags,
+                    Mode = mode,
+                    ActionVersion = newVersion,
+                    CreatedAt = session.CreatedAt,
+                    ExpiresAt = expires,
+                    LastActionAt = now
+                };
+            }
+        }
+    }
+
+    public void ExpireWriteSession(string id)
+    {
+        lock (_writeLock)
+        {
+            using var conn = OpenConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE write_sessions SET expires_at=$now, last_action_at=$now WHERE id=$id;";
+            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public int DeleteExpiredWriteSessions()
+    {
+        lock (_writeLock)
+        {
+            using var conn = OpenConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM write_sessions WHERE expires_at < $now;";
+            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+            return cmd.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyList<string> GetPopularTags(int limit)
+    {
+        using var conn = OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT tag, COUNT(*) AS c
+            FROM message_tags
+            GROUP BY tag
+            ORDER BY c DESC, tag
+            LIMIT $lim;
+            """;
+        cmd.Parameters.AddWithValue("$lim", Math.Max(0, limit));
+        var list = new List<string>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(r.GetString(0));
+        return list;
+    }
+
+    private static WriteSessionRecord ReadSession(SqliteDataReader r) => new()
+    {
+        Id = r.GetString(0),
+        ClientId = r.GetString(1),
+        Token = r.GetString(2),
+        Draft = r.GetString(3),
+        Tags = r.GetString(4),
+        Mode = r.GetString(5),
+        ActionVersion = r.GetInt64(6),
+        CreatedAt = DateTimeOffset.Parse(r.GetString(7)),
+        ExpiresAt = DateTimeOffset.Parse(r.GetString(8)),
+        LastActionAt = DateTimeOffset.Parse(r.GetString(9))
+    };
+
+    private static string ToCrockfordBase32(byte[] bytes)
+    {
+        const string alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+        var sb = new StringBuilder((bytes.Length * 8 + 4) / 5);
+        var buffer = 0;
+        var bits = 0;
+        foreach (var b in bytes)
+        {
+            buffer = (buffer << 8) | b;
+            bits += 8;
+            while (bits >= 5)
+            {
+                bits -= 5;
+                sb.Append(alphabet[(buffer >> bits) & 31]);
+            }
+        }
+        if (bits > 0)
+            sb.Append(alphabet[(buffer << (5 - bits)) & 31]);
+        return sb.ToString();
+    }
 
     private static IReadOnlyList<string> LoadTags(SqliteConnection conn, long id)
     {

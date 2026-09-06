@@ -152,6 +152,19 @@ public sealed class BoardService
 
     public IResult Post(string? text, string? tags, string? clientId, string? token, string? nonce, string ip)
     {
+        var err = TryPost(text, tags, clientId, token, nonce, ip, out var id, out var created, out var replayed);
+        if (err is not null) return err;
+        return _responses.Markdown(_responses.RenderCreated(id, created, replayed));
+    }
+
+    /// <summary>Create a root message; returns null on success.</summary>
+    public IResult? TryPost(string? text, string? tags, string? clientId, string? token, string? nonce, string ip,
+        out long id, out DateTimeOffset createdAt, out bool replayed)
+    {
+        id = 0;
+        createdAt = default;
+        replayed = false;
+
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(nonce))
             return _responses.Error("WRITE_AUTH_REQUIRED", "client, token and nonce are required for writes.", 401);
         if (!_store.ValidateClient(clientId, token))
@@ -169,14 +182,15 @@ public sealed class BoardService
 
         if (!_store.TryConsumeNonce(clientId, nonce, "post", (conn, tx) =>
                 _store.InsertMessage(conn, tx, clientId, text, tagList, null),
-            out var id, out var replayed, out var err))
+            out id, out replayed, out var err))
         {
             return _responses.Error(err ?? "WRITE_FAILED", "Could not create message.", 400);
         }
 
         var msg = _store.GetMessage(id)!;
+        createdAt = msg.CreatedAt;
         _cache.InvalidateMessage(id);
-        return _responses.Markdown(_responses.RenderCreated(id, msg.CreatedAt, replayed));
+        return null;
     }
 
     public IResult Reply(long? to, string? text, string? clientId, string? token, string? nonce, string ip)
@@ -257,6 +271,7 @@ public sealed class BoardService
     {
         _store.EvictIfNeeded(_archive);
         _archive.RotateIfNeeded();
+        _store.DeleteExpiredWriteSessions();
         _store.CheckpointPassive();
     }
 }

@@ -26,6 +26,11 @@ Free-form lowercase tokens. Filters only — not namespaces.
 ## Clients
 
 Anonymous `client` + `token` from `/join`. Token stored as SHA-256 hash. IP is not identity.
+New tokens are short base64url (~128 bit); older hex tokens remain valid until unused.
+
+## Click-safe sessions
+
+Ephemeral `write_sessions` rows back `/go` and `/s/{id}`: server-side draft/tags, short session id, HMAC action links, TTL cleanup in maintenance.
 
 ## Write nonces / challenges
 

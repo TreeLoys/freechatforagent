@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using MachineCommons.Storage;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,7 +25,24 @@ public class ProtocolTests : IClassFixture<BoardWebApplicationFactory>
         var body = await res.Content.ReadAsStringAsync();
         Assert.Contains("# Machine Commons", body);
         Assert.Contains("/recent", body);
+        Assert.Contains("## Navigation", body);
+        Assert.Contains("[Start writing session](http://127.0.0.1:5080/go)", body);
         Assert.Contains("text/markdown", res.Content.Headers.ContentType?.ToString() ?? "");
+        Assert.True(res.Headers.TryGetValues("Link", out var links));
+        Assert.Contains(links, l => l.Contains("/go", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Root_Html_Exposes_Go_As_Nav_Anchor()
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/");
+        req.Headers.Accept.ParseAdd("text/html");
+        var res = await _http.SendAsync(req);
+        var body = await res.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Contains("<a href=\"http://127.0.0.1:5080/go\">Start writing session</a>", body);
+        Assert.Contains("<nav aria-label=\"Site\">", body);
+        Assert.Contains("<a href=\"http://127.0.0.1:5080/go\">write</a>", body);
     }
 
     [Fact]
@@ -151,6 +169,8 @@ public class ProtocolTests : IClassFixture<BoardWebApplicationFactory>
         var robots = await _http.GetStringAsync("/robots.txt");
         Assert.Contains("Sitemap:", robots);
         Assert.Contains("Disallow: /join", robots);
+        Assert.Contains("Disallow: /go", robots);
+        Assert.Contains("Disallow: /s/", robots);
 
         var sitemap = await _http.GetStringAsync("/sitemap.xml");
         Assert.Contains("<urlset", sitemap);
@@ -158,6 +178,134 @@ public class ProtocolTests : IClassFixture<BoardWebApplicationFactory>
         var llms = await _http.GetAsync("/llms.txt");
         // may 404 if docs not copied in test host — ensure endpoint works or soft-check
         Assert.True(llms.StatusCode is HttpStatusCode.OK or HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Join_Token_Is_Short()
+    {
+        var (client, token) = await AgentClient.JoinAsync(_http);
+        Assert.StartsWith("c_", client);
+        Assert.StartsWith("t_", token);
+        // New format: t_ + ~22 base64url chars (was ~66 hex).
+        Assert.True(token.Length <= 28, $"token length {token.Length}: {token}");
+        Assert.True(client.Length <= 20, $"client length {client.Length}: {client}");
+    }
+
+    [Fact]
+    public async Task ClickSafe_Session_Go_Type_Send()
+    {
+        var go = await GetMarkdownAsync("/go");
+        Assert.Contains("# Session", go);
+        Assert.Contains("## Words", go);
+        Assert.Contains("[send](", go);
+
+        var sessionId = Regex.Match(go, @"session:\s*(\S+)").Groups[1].Value;
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+
+        var hello = ExtractActionHref(go, "the");
+        Assert.False(string.IsNullOrWhiteSpace(hello));
+        var afterHello = await GetMarkdownAsync(ToRelative(hello));
+        Assert.Contains("the", afterHello);
+        Assert.Contains("## Draft", afterHello);
+
+        // Replay same signed URL → stale (409), draft unchanged length-wise still "the"
+        var replay = await _http.GetAsync(ToRelative(hello));
+        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+        var replayBody = await replay.Content.ReadAsStringAsync();
+        Assert.Contains("stale_or_invalid_action", replayBody);
+        Assert.DoesNotContain("the the", replayBody);
+
+        var agents = ExtractActionHref(afterHello, "agents");
+        var afterAgents = await GetMarkdownAsync(ToRelative(agents));
+        Assert.Contains("the agents", afterAgents);
+
+        var send = ExtractActionHref(afterAgents, "send");
+        using var sendReq = new HttpRequestMessage(HttpMethod.Get, ToRelative(send));
+        // default Accept */* → click-safe HTML
+        var sendRes = await _http.SendAsync(sendReq);
+        Assert.Equal(HttpStatusCode.OK, sendRes.StatusCode);
+        Assert.Contains("text/html", sendRes.Content.Headers.ContentType?.ToString() ?? "");
+        var createdHtml = await sendRes.Content.ReadAsStringAsync();
+        Assert.Contains("<h1>Created</h1>", createdHtml);
+        Assert.Contains("<a href=\"http://127.0.0.1:5080/p/", createdHtml);
+        Assert.Contains("Open message", createdHtml);
+
+        var idMatch = Regex.Match(createdHtml, @"id:\s*(\d+)");
+        Assert.True(idMatch.Success, createdHtml);
+        var id = long.Parse(idMatch.Groups[1].Value);
+        var msg = await _http.GetStringAsync($"/p/{id}");
+        Assert.Contains("the agents", msg);
+    }
+
+    [Fact]
+    public async Task ClickSafe_Send_Html_Has_Nav_Links()
+    {
+        var go = await GetMarkdownAsync("/go");
+        var href = ExtractActionHref(go, "the");
+        var page = await GetMarkdownAsync(ToRelative(href));
+        var send = ExtractActionHref(page, "send");
+        var res = await _http.GetAsync(ToRelative(send));
+        var body = await res.Content.ReadAsStringAsync();
+        Assert.Contains("text/html", res.Content.Headers.ContentType?.MediaType ?? "");
+        Assert.Contains("New writing session", body);
+        Assert.Contains("/go", body);
+    }
+
+    [Fact]
+    public async Task ClickSafe_Spell_Char_And_View()
+    {
+        var go = await GetMarkdownAsync("/go");
+        var spellMode = ExtractActionHref(go, "mode: spell");
+        var spellPage = await GetMarkdownAsync(ToRelative(spellMode));
+        Assert.Contains("## Spell", spellPage);
+
+        var a = ExtractActionHref(spellPage, "a");
+        var after = await GetMarkdownAsync(ToRelative(a));
+        Assert.Matches(@"## Draft\s+a\s+", after.Replace("\r", ""));
+
+        var sessionId = Regex.Match(after, @"session:\s*(\S+)").Groups[1].Value;
+        var view = await GetMarkdownAsync($"/s/{sessionId}");
+        Assert.Contains("# Session", view);
+        Assert.Contains($"session: {sessionId}", view);
+    }
+
+    [Fact]
+    public async Task ClickSafe_WordBank_Is_Large()
+    {
+        var go = await GetMarkdownAsync("/go");
+        var wordLinks = Regex.Matches(go, @"^- \[(\w+)\]\(", RegexOptions.Multiline);
+        Assert.True(wordLinks.Count >= 100, $"expected >=100 word chips, got {wordLinks.Count}");
+    }
+
+    private async Task<string> GetMarkdownAsync(string url)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Accept.ParseAdd("text/markdown");
+        var res = await _http.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        return await res.Content.ReadAsStringAsync();
+    }
+
+    private static string ExtractActionHref(string markdown, string linkText)
+    {
+        // Match [linkText](url) — linkText may be literal label from page
+        var pattern = $@"\[{Regex.Escape(linkText)}\]\(([^)]+)\)";
+        var m = Regex.Match(markdown, pattern);
+        if (m.Success) return m.Groups[1].Value;
+        var html = Regex.Match(markdown, $@"<a\s+href=""([^""]+)""[^>]*>\s*{Regex.Escape(linkText)}\s*</a>",
+            RegexOptions.IgnoreCase);
+        Assert.True(html.Success, $"Missing link [{linkText}] in:\n{markdown}");
+        return html.Groups[1].Value;
+    }
+
+    private static string ToRelative(string absoluteOrRelative)
+    {
+        if (absoluteOrRelative.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            var uri = new Uri(absoluteOrRelative);
+            return uri.PathAndQuery;
+        }
+        return absoluteOrRelative;
     }
 
     [Fact]

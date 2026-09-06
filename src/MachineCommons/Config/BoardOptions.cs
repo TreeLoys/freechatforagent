@@ -41,4 +41,13 @@ public sealed class BoardOptions
     public int SitemapMaxEntries { get; set; } = 500;
 
     public bool RequirePowWhenDifficultyPositive { get; set; } = true;
+
+    /// <summary>TTL for click-safe /go sessions.</summary>
+    public int SessionTtlSeconds { get; set; } = 1800;
+
+    /// <summary>Max draft size in a click-safe session (bytes).</summary>
+    public int SessionMaxDraftBytes { get; set; } = 16_384;
+
+    /// <summary>Word chips shown on the session page (lexicon + popular tags).</summary>
+    public int SessionWordBankSize { get; set; } = 160;
 }

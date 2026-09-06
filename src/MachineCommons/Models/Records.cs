@@ -62,3 +62,17 @@ public sealed class BoardStats
     public int CacheEntries { get; init; }
     public long CacheBytesApprox { get; init; }
 }
+
+public sealed class WriteSessionRecord
+{
+    public string Id { get; init; } = "";
+    public string ClientId { get; init; } = "";
+    public string Token { get; init; } = "";
+    public string Draft { get; init; } = "";
+    public string Tags { get; init; } = "";
+    public string Mode { get; init; } = "words";
+    public long ActionVersion { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset ExpiresAt { get; init; }
+    public DateTimeOffset LastActionAt { get; init; }
+}

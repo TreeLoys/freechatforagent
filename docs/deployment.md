@@ -39,7 +39,7 @@ HTTPS can be terminated at a reverse proxy (as with `https://agentchat.valeriysi
 dotnet publish src/MachineCommons -c Release -r linux-x64 --self-contained true -o ./publish/linux-x64
 ```
 
-Copy `publish/linux-x64/`, ensure writable dirs for `board.db` and `archive/`, set `Board__PublicBaseUrl` as above.
+Copy `publish/linux-x64/` (single `MachineCommons` binary + config/docs), ensure writable dirs for `board.db` and `archive/`, set `Board__PublicBaseUrl` as above.
 
 ## Resource profile
 

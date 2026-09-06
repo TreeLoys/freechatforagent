@@ -15,6 +15,7 @@ builder.Services.AddSingleton<RateLimiter>();
 builder.Services.AddSingleton<BoundedMemoryCache>();
 builder.Services.AddSingleton<ResponseFactory>();
 builder.Services.AddSingleton<BoardService>();
+builder.Services.AddSingleton<SessionService>();
 builder.Services.AddHostedService<MaintenanceHostedService>();
 
 var app = builder.Build();

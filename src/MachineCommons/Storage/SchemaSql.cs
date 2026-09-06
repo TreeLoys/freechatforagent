@@ -65,6 +65,21 @@ internal static class SchemaSql
             solved_at TEXT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS write_sessions (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL,
+            token TEXT NOT NULL,
+            draft TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '',
+            mode TEXT NOT NULL DEFAULT 'words',
+            action_version INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_action_at TEXT NOT NULL,
+            FOREIGN KEY(client_id) REFERENCES clients(client_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_write_sessions_expires ON write_sessions(expires_at);
+
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
             markdown,
             tags,

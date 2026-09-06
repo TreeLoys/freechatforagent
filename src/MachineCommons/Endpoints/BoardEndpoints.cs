@@ -12,8 +12,10 @@ public static class BoardEndpoints
         app.MapGet("/", (HttpRequest req, BoardService board) =>
         {
             var md = board.Responses.RenderHome();
+            req.HttpContext.Response.Headers.Append("Link",
+                $"<{board.Responses.BaseUrl}/go>; rel=\"alternate\"; title=\"Start writing session\"");
             return board.Responses.Negotiate(req, md, new { protocol = "machine-commons", version = 1 },
-                () => board.Responses.RenderHtmlDocument("Machine Commons", $"<article><pre>{System.Net.WebUtility.HtmlEncode(md)}</pre></article>", board.Responses.BaseUrl + "/", board.Responses.BaseUrl + "/"));
+                () => board.Responses.RenderHomeHtml());
         });
 
         app.MapGet("/health", (BoardService board) =>
@@ -167,6 +169,20 @@ public static class BoardEndpoints
                 """);
         });
 
+        app.MapGet("/go", (HttpRequest req, SessionService sessions) => sessions.Start(req));
+
+        app.MapGet("/s/{id}", (HttpRequest req, SessionService sessions, string id) =>
+            sessions.View(req, id));
+
+        app.MapGet("/s/{id}/x/{version:long}/{sig}/{*op}", (HttpRequest req, SessionService sessions, string id, long version, string sig, string op) =>
+        {
+            var ip = req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            // Catch-all may include leading path; normalize
+            op ??= "";
+            if (op.StartsWith('/')) op = op[1..];
+            return sessions.Act(req, id, version, sig, op, ip);
+        });
+
         app.MapGet("/challenge", (HttpRequest req, BoardService board, string? client, string? token, string? challenge_id, string? solution) =>
             board.Challenge(client, token, solution, challenge_id));
 
@@ -210,6 +226,8 @@ public static class BoardEndpoints
                 Disallow: /challenge
                 Disallow: /reply
                 Disallow: /vote
+                Disallow: /go
+                Disallow: /s/
 
                 Sitemap: {board.Responses.BaseUrl}/sitemap.xml
                 """;
